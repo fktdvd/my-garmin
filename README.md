@@ -79,6 +79,14 @@ Minden más a `data/raw` alatt elérhető, és igény szerint bővíthető a `sr
 .\.venv\Scripts\jupyter lab notebooks
 ```
 
+| notebook | tartalom |
+|---|---|
+| `01_overview.ipynb` | napi trendek, alvás, aktivitások összesítve |
+| `02_activity.ipynb` | egy aktivitás részletesen: összefoglaló, edzéshatás, idősorok (pulzus, sebesség, magasság, kadencia, Body Battery), pulzuszónák, körök + pulzus-visszaállás pihenőkben, GPS útvonal, időjárás, eredeti FIT |
+
+A notebookok a `mygarmin.analysis` modult használják (`load_activity`, `lap_stats`, …).
+A kimenetek személyes adatot tartalmaznak — commit előtt töröld őket (*Clear All Outputs*).
+
 ## Megjegyzések
 
 - A [python-garminconnect](https://github.com/cyberjunky/python-garminconnect) nem hivatalos kliens:
