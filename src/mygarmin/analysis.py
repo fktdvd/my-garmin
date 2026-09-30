@@ -17,22 +17,7 @@ from typing import Any
 import pandas as pd
 
 from mygarmin import raw_store
-
-# Garmin metric key -> (column name, conversion factor)
-METRICS: dict[str, tuple[str, float]] = {
-    "directHeartRate": ("hr", 1),
-    "directSpeed": ("speed_kmh", 3.6),
-    "directElevation": ("elevation_m", 1),
-    "directVerticalSpeed": ("vertical_speed_ms", 1),
-    "directDoubleCadence": ("cadence_spm", 1),
-    "directBodyBattery": ("body_battery", 1),
-    "directCaloriesBurnRate": ("kcal_per_min", 1),
-    "directLatitude": ("lat", 1),
-    "directLongitude": ("lon", 1),
-    "directGrit": ("grit", 1),
-    "directFlow": ("flow", 1),
-    "sumDistance": ("distance_m", 1),
-}
+from mygarmin.db import ACTIVITY_METRICS as METRICS
 
 
 @dataclass

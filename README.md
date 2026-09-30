@@ -82,16 +82,29 @@ mert mindig az utolsó sikeres naptól tölt.
 
 Állapot: `data/state.json`, napló: `data/logs/mygarmin.log`.
 
-## SQLite táblák (első kör)
+## SQLite táblák
 
 | tábla | forrás |
 |---|---|
 | `daily_summary` | lépés, kalória, nyugalmi/min/max pulzus, stressz, Body Battery, emelet, intenzív percek |
 | `sleep` | alvásfázisok, alvás pontszám, légzés, SpO2 |
 | `hrv` | éjszakai / heti HRV, státusz |
+| `intraday` | napon belüli idősorok hosszú formában (`metric`, `ts_ms`, `value`): `heart_rate` (2 perc), `stress`, `body_battery` (3 perc), `respiration` |
+| `training_readiness` | edzéskészség pontszám és tényezői; naponta több mérés, `is_morning=1` az ébredés utáni |
+| `training_status` | edzésállapot, akut/krónikus terhelés, ACWR, VO2max, havi terheléseloszlás |
 | `activities` | aktivitás összefoglalók + hivatkozás a raw mappára |
+| `activity_laps` | körök / szakaszok (időtartam, pulzus, intenzitás típus: ACTIVE/REST/…) |
+| `activity_samples` | aktivitás idősor (pulzus, sebesség, magasság, kadencia, Body Battery, GPS, …) |
 
+Időbélyegek: `*_ms` = Unix epoch ms (UTC), `*_gmt` = UTC szöveg, `*_local` = az óra helyi ideje.
 Minden más a `data/raw` alatt elérhető, és igény szerint bővíthető a `src/mygarmin/db.py`-ban.
+Az eredeti FIT rekordok: `mygarmin.analysis.Activity.fit_messages()`.
+
+```sql
+-- példa: óránkénti átlagpulzus egy napon
+SELECT strftime('%H', ts_ms / 1000, 'unixepoch', 'localtime') AS ora, ROUND(AVG(value)) AS pulzus
+FROM intraday WHERE metric = 'heart_rate' AND date = '2026-09-20' GROUP BY ora;
+```
 
 ## Elemzés
 
