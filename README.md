@@ -116,8 +116,9 @@ uv run jupyter lab notebooks
 |---|---|
 | `01_overview.ipynb` | napi trendek, alvás, aktivitások összesítve |
 | `02_activity.ipynb` | egy aktivitás részletesen: összefoglaló, edzéshatás, idősorok (pulzus, sebesség, magasság, kadencia, Body Battery), pulzuszónák, körök + pulzus-visszaállás pihenőkben, GPS útvonal, időjárás, eredeti FIT |
+| `03_daily.ipynb` | egy nap idővonala (pulzus, stressz, Body Battery, légzés + alvás és aktivitás sávok), stressz eloszlás, edzéskészség tényezők; trendek: nyugalmi pulzus/HRV, alvás, edzéskészség, akut/krónikus terhelés (ACWR) |
 
-A notebookok a `mygarmin.analysis` modult használják (`load_activity`, `lap_stats`, …).
+A notebookok a `mygarmin.analysis` modult használják (`load_activity`, `lap_stats`, `load_day`, `daily_trends`, …).
 A kimenetek személyes adatot tartalmaznak — commit előtt töröld őket (*Clear All Outputs*).
 
 ## Megjegyzések

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
-from mygarmin import raw_store
+from mygarmin import analysis, raw_store
 from mygarmin.analysis import lap_stats, load_activity
 
 T0 = 1_790_000_000_000  # ms
@@ -85,3 +86,45 @@ def test_missing_files_give_empty_frames(tmp_path):
     a = load_activity(d)
     assert a.series.empty and a.laps.empty and a.hr_zones.empty
     assert lap_stats(a).empty
+
+
+def _day_db(tmp_path: Path) -> Path:
+    from mygarmin import db as dbmod
+    from mygarmin.config import Config
+
+    cfg = Config(tmp_path / "d")
+    conn = dbmod.connect(cfg)
+    t0 = int(pd.Timestamp("2026-09-20", tz=analysis.TZ).timestamp() * 1000)
+    rows = [("stress", t0 + i * 180_000, "2026-09-20", v) for i, v in enumerate([10, 30, 60, 90])]
+    rows += [("heart_rate", t0, "2026-09-20", 60), ("heart_rate", t0 + 120_000, "2026-09-20", 62),
+             ("heart_rate", t0 + 3_600_000, "2026-09-20", 70), ("heart_rate", t0 + 86_400_000, "2026-09-21", 55)]
+    conn.executemany("INSERT INTO intraday VALUES (?, ?, ?, ?)", rows)
+    conn.execute("INSERT INTO daily_summary (date, resting_hr) VALUES ('2026-09-20', 48)")
+    conn.execute("INSERT INTO sleep (date, start_gmt, end_gmt, total_s) VALUES ('2026-09-20', ?, ?, 21600)",
+                 (t0 - 3_600_000, t0 + 18_000_000))
+    conn.execute("INSERT INTO training_readiness (date, timestamp_local, is_morning, score) "
+                 "VALUES ('2026-09-20', '2026-09-20T06:00:00.0', 1, 80)")
+    conn.commit()
+    conn.close()
+    return cfg.db_path
+
+
+def test_load_day_defaults_to_last_full_day(tmp_path: Path):
+    day = analysis.load_day(_day_db(tmp_path))
+    assert day.date == "2026-09-20"
+    assert day.summary["resting_hr"] == 48
+    assert day.metric("heart_rate")["time"].iloc[0].hour == 0  # helyi idő
+    assert len(day.sleeps) == 1 and day.sleeps["end"].iloc[0].hour == 5
+    assert day.readiness["score"].tolist() == [80]
+
+
+def test_day_stress_minutes_and_gap_breaks(tmp_path: Path):
+    day = analysis.load_day(_day_db(tmp_path), "2026-09-20")
+    assert day.stress_minutes().tolist() == [3.0, 3.0, 3.0, 3.0]
+    hr = day.metric("heart_rate", break_gaps="10min")
+    assert len(hr) == 4 and hr["value"].isna().sum() == 1
+
+
+def test_daily_trends_joins_tables(tmp_path: Path):
+    tr = analysis.daily_trends(_day_db(tmp_path))
+    assert tr.loc[0, "resting_hr"] == 48 and tr.loc[0, "readiness_morning"] == 80

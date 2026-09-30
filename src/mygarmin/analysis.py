@@ -165,3 +165,112 @@ def pick_activity(db_path: Path, activity_id: int | None = None) -> Activity:
         raise LookupError("Nincs aktivitás a DB-ben - futtasd: mygarmin sync")
     row = acts.iloc[0] if activity_id is None else acts[acts["activity_id"] == int(activity_id)].iloc[0]
     return load_activity(Path(row["raw_dir"]))
+
+
+# --- Napi nézet (03_daily) -------------------------------------------------
+
+TZ = "Europe/Budapest"
+
+# Garmin stressz kategóriák (0-25 pihenés, 26-50 alacsony, 51-75 közepes, 76-100 magas)
+STRESS_BINS = [0, 25, 50, 75, 100]
+STRESS_LABELS = ["pihenés", "alacsony", "közepes", "magas"]
+
+
+@dataclass
+class Day:
+    date: str
+    intraday: pd.DataFrame  # time (helyi), metric, value
+    summary: dict[str, Any]
+    sleeps: pd.DataFrame  # start, end (helyi): a napot érintő alvások
+    activities: pd.DataFrame  # start, end (helyi), name, type
+    readiness: pd.DataFrame  # a nap összes edzéskészség mérése
+
+    def metric(self, name: str, break_gaps: str | None = None) -> pd.DataFrame:
+        """Egy metrika idősora. `break_gaps` (pl. "10min"): ennél nagyobb szünetbe NaN kerül,
+        így a vonalas ábra nem köti össze a hiányzó szakaszokat."""
+        m = self.intraday[self.intraday["metric"] == name][["time", "value"]].reset_index(drop=True)
+        if break_gaps is None or m.empty:
+            return m
+        gap = m["time"].diff() > pd.Timedelta(break_gaps)
+        breaks = pd.DataFrame({"time": m["time"][gap] - pd.Timedelta(seconds=1), "value": float("nan")})
+        return pd.concat([m, breaks]).sort_values("time").reset_index(drop=True)
+
+    def stress_minutes(self) -> pd.Series:
+        """Percek stressz kategóriánként (egy mérés = a következő mérésig eltelt idő, max. 10 perc)."""
+        s = self.metric("stress")
+        if s.empty:
+            return pd.Series(0.0, index=STRESS_LABELS)
+        step = s["time"].diff().shift(-1).dt.total_seconds().div(60).clip(upper=10).fillna(3)
+        cat = pd.cut(s["value"], STRESS_BINS, labels=STRESS_LABELS, include_lowest=True)
+        return step.groupby(cat, observed=False).sum().reindex(STRESS_LABELS, fill_value=0)
+
+
+def _ms_to_local(ms: pd.Series) -> pd.Series:
+    return pd.to_datetime(ms, unit="ms", utc=True).dt.tz_convert(TZ)
+
+
+def available_days(db_path: Path) -> list[str]:
+    with sqlite3.connect(db_path) as conn:
+        return [r[0] for r in conn.execute("SELECT DISTINCT date FROM intraday ORDER BY date")]
+
+
+def load_day(db_path: Path, day: str | None = None) -> Day:
+    """Egy nap napon belüli adatai; alapból az utolsó teljes nap (tegnap, ha van adat)."""
+    days = available_days(db_path)
+    if not days:
+        raise LookupError("Nincs napon belüli adat - futtasd: mygarmin sync")
+    if day is None:
+        day = days[-2] if len(days) > 1 else days[-1]
+    next_day = (pd.Timestamp(day) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    with sqlite3.connect(db_path) as conn:
+        intraday = pd.read_sql(
+            "SELECT metric, ts_ms, value FROM intraday WHERE date = ? ORDER BY ts_ms", conn, params=(day,))
+        summary = pd.read_sql(
+            "SELECT d.*, s.total_s AS sleep_s, s.score AS sleep_score, h.last_night_avg AS hrv "
+            "FROM daily_summary d LEFT JOIN sleep s USING(date) LEFT JOIN hrv h USING(date) WHERE d.date = ?",
+            conn, params=(day,))
+        sleeps = pd.read_sql(
+            "SELECT date, start_gmt, end_gmt FROM sleep WHERE date IN (?, ?)", conn, params=(day, next_day))
+        acts = pd.read_sql(
+            "SELECT activity_id, start_local, duration_s, name, type FROM activities "
+            "WHERE substr(start_local, 1, 10) = ? ORDER BY start_local", conn, params=(day,))
+        readiness = pd.read_sql(
+            "SELECT * FROM training_readiness WHERE date = ? ORDER BY timestamp_local", conn, params=(day,))
+    intraday["time"] = _ms_to_local(intraday["ts_ms"])
+    sleeps = pd.DataFrame({"start": _ms_to_local(sleeps["start_gmt"]), "end": _ms_to_local(sleeps["end_gmt"])})
+    start = pd.to_datetime(acts["start_local"]).dt.tz_localize(TZ)
+    activities = pd.DataFrame({
+        "activity_id": acts["activity_id"], "start": start,
+        "end": start + pd.to_timedelta(acts["duration_s"], unit="s"),
+        "name": acts["name"], "type": acts["type"],
+    })
+    return Day(
+        date=day,
+        intraday=intraday[["time", "metric", "value"]],
+        summary=summary.iloc[0].to_dict() if not summary.empty else {},
+        sleeps=sleeps,
+        activities=activities,
+        readiness=readiness,
+    )
+
+
+def daily_trends(db_path: Path) -> pd.DataFrame:
+    """Naponként egy sor: nyugalmi pulzus, HRV, alvás, reggeli edzéskészség, terhelés."""
+    with sqlite3.connect(db_path) as conn:
+        df = pd.read_sql(
+            """
+            SELECT d.date, d.resting_hr, h.last_night_avg AS hrv, h.weekly_avg AS hrv_weekly,
+                   s.score AS sleep_score, round(s.total_s / 3600.0, 2) AS sleep_h,
+                   d.avg_stress, d.body_battery_high, d.body_battery_low,
+                   (SELECT score FROM training_readiness r WHERE r.date = d.date AND r.is_morning = 1
+                    ORDER BY r.timestamp_local LIMIT 1) AS readiness_morning,
+                   t.acute_load, t.chronic_load, t.chronic_load_min, t.chronic_load_max, t.acwr,
+                   t.status_phrase, t.vo2max
+            FROM daily_summary d
+            LEFT JOIN hrv h USING(date) LEFT JOIN sleep s USING(date) LEFT JOIN training_status t USING(date)
+            ORDER BY d.date
+            """,
+            conn,
+        )
+    df["date"] = pd.to_datetime(df["date"])
+    return df
