@@ -15,9 +15,9 @@ $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 # pythonw: no console window pops up on scheduled runs
 $pythonw = Join-Path $repo ".venv\Scripts\pythonw.exe"
-if (-not (Test-Path $pythonw)) { throw "Nem található: $pythonw - előbb hozd létre a .venv-et (lásd README)." }
+if (-not (Test-Path $pythonw)) { throw "Nem található: $pythonw - előbb futtasd: uv sync (lásd README)." }
 if (-not (Test-Path (Join-Path $repo "data\.garminconnect"))) {
-    Write-Warning "Nincs mentett token. Futtasd előbb: .venv\Scripts\mygarmin login"
+    Write-Warning "Nincs mentett token. Futtasd előbb: uv run mygarmin login"
 }
 
 $action = New-ScheduledTaskAction -Execute $pythonw -Argument "-m mygarmin sync" -WorkingDirectory $repo

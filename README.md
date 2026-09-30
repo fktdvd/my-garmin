@@ -14,38 +14,58 @@ Garmin Connect ──(mygarmin sync)──▶ data/raw/  (nyers JSON + eredeti F
 
 ## Telepítés
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -e ".[analysis,dev]"
+A projekt [uv](https://docs.astral.sh/uv/)-t használ; Windows-on és Linuxon ugyanúgy működik.
+Python ≥ 3.12 kell, de az uv magától letölti (`.python-version`), a verziók az `uv.lock`-ban rögzítve vannak.
+
+```bash
+# uv telepítése
+winget install astral-sh.uv                        # Windows
+curl -LsSf https://astral.sh/uv/install.sh | sh    # Linux / macOS
+
+# függőségek (.venv létrehozása)
+uv sync --extra analysis        # elemzéssel (Jupyter, pandas, …)
+uv sync                         # csak a szinkron (pl. szerveren)
 ```
 
 ## Használat
 
-```powershell
+```bash
 # 1. Egyszeri bejelentkezés (e-mail, jelszó, MFA ha van). A tokenek a data/.garminconnect alá kerülnek,
 #    a jelszó NEM mentődik. Amíg a tokenek érvényesek (a sync frissíti őket), nem kell újra belépni.
-.\.venv\Scripts\mygarmin login
+#    Új gépen újra be kell lépni (vagy át kell másolni a data/ mappát).
+uv run mygarmin login
 
 # 2. Kézi szinkron (első futáskor az utolsó 30 nap, utána inkrementális)
-.\.venv\Scripts\mygarmin sync
+uv run mygarmin sync
 
 # Teljes visszatöltés egy adott naptól (lassú: napi ~30 hívás!)
-.\.venv\Scripts\mygarmin sync --since 2024-01-01
+uv run mygarmin sync --since 2024-01-01
 
 # SQLite újraépítése a raw fájlokból
-.\.venv\Scripts\mygarmin ingest --rebuild
+uv run mygarmin ingest --rebuild
 ```
 
+Az adatmappa helye a `MYGARMIN_DATA_DIR` környezeti változóval módosítható (alapból `./data`).
+
 ### Ütemezés (01:00 és 13:00)
+
+Windows (Feladatütemező):
 
 ```powershell
 .\scripts\register-task.ps1                                       # regisztrálás (admin jog nem kell)
 Unregister-ScheduledTask -TaskName my-garmin-sync -Confirm:$false  # törlés
 ```
 
+Linux (cron):
+
+```bash
+./scripts/install-cron.sh             # telepítés (idempotens)
+./scripts/install-cron.sh --remove    # törlés
+SCHEDULE="0 */6 * * *" ./scripts/install-cron.sh   # más időzítés
+```
+
 Ha a gép ki van kapcsolva, a futás kimarad; a következő (kézi vagy ütemezett) futás pótolja,
 mert mindig az utolsó sikeres naptól tölt.
-
 ## Hogyan működik a szinkron
 
 - **Napi végpontok** (alvás, pulzus, stressz, Body Battery, HRV, SpO2, légzés, edzéskészség, …) naponta:
@@ -75,8 +95,8 @@ Minden más a `data/raw` alatt elérhető, és igény szerint bővíthető a `sr
 
 ## Elemzés
 
-```powershell
-.\.venv\Scripts\jupyter lab notebooks
+```bash
+uv run jupyter lab notebooks
 ```
 
 | notebook | tartalom |
@@ -92,4 +112,4 @@ A kimenetek személyes adatot tartalmaznak — commit előtt töröld őket (*Cl
 - A [python-garminconnect](https://github.com/cyberjunky/python-garminconnect) nem hivatalos kliens:
   Garmin-oldali változás bármikor eltörheti. A verzió a `pyproject.toml`-ban rögzítve van.
 - A `data/` mappa személyes adatot és tokeneket tartalmaz — `.gitignore`-ban van, soha ne commitold.
-- Tesztek: `.\.venv\Scripts\python -m pytest`
+- Tesztek: `uv run pytest`

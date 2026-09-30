@@ -7,13 +7,15 @@ name = "mygarmin"
 version = "0.1.0"
 description = "Garmin Connect adatok lokális mentése, tárolása és elemzése"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "garminconnect==0.3.17",
 ]
 
 [project.optional-dependencies]
 analysis = ["pandas", "matplotlib", "jupyter", "fitparse"]
+
+[dependency-groups]
 dev = ["pytest"]
 
 [project.scripts]
