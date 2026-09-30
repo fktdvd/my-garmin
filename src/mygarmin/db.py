@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,8 @@ CREATE TABLE IF NOT EXISTS sleep (
     date            TEXT PRIMARY KEY,
     start_gmt       INTEGER,
     end_gmt         INTEGER,
+    bedtime_local   TEXT,
+    wake_local      TEXT,
     total_s         INTEGER,
     deep_s          INTEGER,
     light_s         INTEGER,
@@ -74,8 +77,26 @@ CREATE TABLE IF NOT EXISTS activities (
     avg_hr          REAL,
     max_hr          REAL,
     calories        REAL,
+    aerobic_te      REAL,
+    anaerobic_te    REAL,
+    training_load   REAL,
+    te_label        TEXT,
+    hr_z1_s         REAL,
+    hr_z2_s         REAL,
+    hr_z3_s         REAL,
+    hr_z4_s         REAL,
+    hr_z5_s         REAL,
     has_original    INTEGER,
     raw_dir         TEXT
+);
+
+-- Folyadékbevitel (a Garmin Connect appban rögzített); a cél a verejtékveszteséggel nő.
+CREATE TABLE IF NOT EXISTS hydration (
+    date                TEXT PRIMARY KEY,
+    intake_ml           REAL,
+    goal_ml             REAL,
+    sweat_loss_ml       REAL,
+    activity_intake_ml  REAL
 );
 
 -- Napon belüli idősorok hosszú formában: metric = heart_rate | stress | body_battery | respiration.
@@ -126,6 +147,12 @@ CREATE TABLE IF NOT EXISTS training_status (
     monthly_load_aerobic_low  REAL,
     monthly_load_aerobic_high REAL,
     monthly_load_anaerobic    REAL,
+    aerobic_low_target_min    REAL,
+    aerobic_low_target_max    REAL,
+    aerobic_high_target_min   REAL,
+    aerobic_high_target_max   REAL,
+    anaerobic_target_min      REAL,
+    anaerobic_target_max      REAL,
     load_balance_phrase TEXT
 );
 
@@ -164,7 +191,7 @@ CREATE TABLE IF NOT EXISTS activity_samples (
 """
 
 TABLES = (
-    "daily_summary", "sleep", "hrv", "activities", "intraday",
+    "daily_summary", "sleep", "hrv", "activities", "hydration", "intraday",
     "training_readiness", "training_status", "activity_laps", "activity_samples",
 )
 
@@ -201,9 +228,25 @@ INTRADAY_SOURCES: dict[str, list[tuple[str, str, str, str, int]]] = {
 }
 
 
+def _columns(conn: sqlite3.Connection, table: str) -> list[str]:
+    return [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+
+
 def connect(cfg: Config) -> sqlite3.Connection:
+    """Open the DB; tables whose columns differ from SCHEMA are dropped and recreated.
+
+    Safe because the DB is derived: every ingest re-reads all raw files.
+    """
     cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(cfg.db_path)
+    expected = sqlite3.connect(":memory:")
+    expected.executescript(SCHEMA)
+    for table in TABLES:
+        have = _columns(conn, table)
+        if have and have != _columns(expected, table):
+            log.info("Séma változott, tábla újraépül: %s", table)
+            conn.execute(f"DROP TABLE {table}")
+    expected.close()
     conn.executescript(SCHEMA)
     return conn
 
@@ -243,6 +286,13 @@ def parse_user_summary(day: str, d: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _local_ms_to_text(ms: Any) -> str | None:
+    """Garmin '*Local' epoch values are local wall-clock time encoded as if UTC."""
+    if not isinstance(ms, (int, float)):
+        return None
+    return datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def parse_sleep(day: str, d: dict[str, Any]) -> dict[str, Any] | None:
     s = d.get("dailySleepDTO") or {}
     if not s.get("sleepTimeSeconds"):
@@ -251,6 +301,8 @@ def parse_sleep(day: str, d: dict[str, Any]) -> dict[str, Any] | None:
         "date": day,
         "start_gmt": s.get("sleepStartTimestampGMT"),
         "end_gmt": s.get("sleepEndTimestampGMT"),
+        "bedtime_local": _local_ms_to_text(s.get("sleepStartTimestampLocal")),
+        "wake_local": _local_ms_to_text(s.get("sleepEndTimestampLocal")),
         "total_s": s.get("sleepTimeSeconds"),
         "deep_s": s.get("deepSleepSeconds"),
         "light_s": s.get("lightSleepSeconds"),
@@ -286,8 +338,25 @@ def parse_activity(folder: Path, d: dict[str, Any]) -> dict[str, Any]:
         "avg_hr": d.get("averageHR"),
         "max_hr": d.get("maxHR"),
         "calories": d.get("calories"),
+        "aerobic_te": d.get("aerobicTrainingEffect"),
+        "anaerobic_te": d.get("anaerobicTrainingEffect"),
+        "training_load": d.get("activityTrainingLoad"),
+        "te_label": d.get("trainingEffectLabel"),
+        **{f"hr_z{i}_s": d.get(f"hrTimeInZone_{i}") for i in range(1, 6)},
         "has_original": int((folder / raw_store.ORIGINAL_FILE).is_file()),
         "raw_dir": str(folder),
+    }
+
+
+def parse_hydration(day: str, d: dict[str, Any]) -> dict[str, Any] | None:
+    if d.get("valueInML") is None and d.get("goalInML") is None:
+        return None
+    return {
+        "date": day,
+        "intake_ml": d.get("valueInML"),
+        "goal_ml": d.get("goalInML"),
+        "sweat_loss_ml": d.get("sweatLossInML"),
+        "activity_intake_ml": d.get("activityIntakeInML"),
     }
 
 
@@ -374,6 +443,12 @@ def parse_training_status(day: str, d: dict[str, Any]) -> dict[str, Any] | None:
         "monthly_load_aerobic_low": balance.get("monthlyLoadAerobicLow"),
         "monthly_load_aerobic_high": balance.get("monthlyLoadAerobicHigh"),
         "monthly_load_anaerobic": balance.get("monthlyLoadAnaerobic"),
+        "aerobic_low_target_min": balance.get("monthlyLoadAerobicLowTargetMin"),
+        "aerobic_low_target_max": balance.get("monthlyLoadAerobicLowTargetMax"),
+        "aerobic_high_target_min": balance.get("monthlyLoadAerobicHighTargetMin"),
+        "aerobic_high_target_max": balance.get("monthlyLoadAerobicHighTargetMax"),
+        "anaerobic_target_min": balance.get("monthlyLoadAnaerobicTargetMin"),
+        "anaerobic_target_max": balance.get("monthlyLoadAnaerobicTargetMax"),
         "load_balance_phrase": balance.get("trainingBalanceFeedbackPhrase"),
     }
 
@@ -423,6 +498,7 @@ DAILY_PARSERS = {
     "get_user_summary": ("daily_summary", parse_user_summary),
     "get_sleep_data": ("sleep", parse_sleep),
     "get_hrv_data": ("hrv", parse_hrv),
+    "get_hydration_data": ("hydration", parse_hydration),
     "get_training_readiness": ("training_readiness", parse_training_readiness),
     "get_training_status": ("training_status", parse_training_status),
 }

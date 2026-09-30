@@ -1,0 +1,25 @@
+# Copy to data/profile.toml and adjust. Anything left out falls back to the defaults.
+
+[goals]
+sleep_hours = 7.5                 # per night
+bedtime = "23:00"                 # target lights-out
+hydration_ml = 2000               # per day
+aerobic_sessions_per_week = 3     # aerobic training effect >= 2.0
+aerobic_minutes_per_week = 150    # minutes in HR zone 2-3
+
+[context]
+# Free text for the AI: who you are, what you train, what the watch cannot see.
+text = """
+Hobbi falmászó vagyok (spray wall / terem), a mászást az óra nem rögzíti.
+Az aerob kapacitást mászáshoz szeretném javítani, közvetetten: kerékpár (beltéri + MTB)
+és kettlebell. A kettlebell edzés "other" típusú, "swing" névvel szerepel.
+A folyadékot a Garmin Connect appban rögzítem; ha egy nap 0 ml, valószínűleg csak elfelejtettem.
+"""
+
+[report]
+language = "magyar"
+
+[report.max_words]
+daily = 250
+weekly = 450
+monthly = 650

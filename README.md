@@ -10,6 +10,8 @@ Garmin Connect ──(mygarmin sync)──▶ data/raw/  (nyers JSON + eredeti F
                                   (mygarmin ingest)
                                         ▼
                                   data/garmin.db (SQLite) ──▶ notebooks/ (Jupyter), később Grafana
+                                        │
+                                  (mygarmin report) ──▶ AI riport e-mailben (#8)
 ```
 
 ## Telepítés
@@ -66,6 +68,40 @@ SCHEDULE="0 */6 * * *" ./scripts/install-cron.sh   # más időzítés
 
 Ha a gép ki van kapcsolva, a futás kimarad; a következő (kézi vagy ütemezett) futás pótolja,
 mert mindig az utolsó sikeres naptól tölt.
+
+## AI riportok (napi / heti / havi, e-mailben)
+
+A számokat Python számolja (`src/mygarmin/report/facts.py`), az AI csak értelmez és javasol a céljaid
+alapján (alvás, folyadék, aerob edzés a mászáshoz). Ha több adat kell neki, csak olvasható SQL-lel
+lekérdezheti az adatbázist (`run_sql` eszköz; GPS-koordinátát és fájlútvonalat nem lát).
+Bármilyen OpenAI-kompatibilis API jó (alapból DeepSeek).
+
+```bash
+cp .env.example .env                        # API-kulcs + SMTP (Gmail: alkalmazásjelszó kell)
+cp profile.example.toml data/profile.toml   # célok + háttér szövegesen az AI-nak
+
+uv run mygarmin report daily --dry-run      # csak kiírja a promptot + tényeket, nem hív AI-t
+uv run mygarmin report daily --no-email     # AI riport → data/reports/daily/<nap>.md
+uv run mygarmin report weekly               # + e-mail (heti: az utolsó teljes hét H–V)
+uv run mygarmin report monthly --force      # újragenerálás (havi: az utolsó teljes hónap)
+uv run mygarmin report auto                 # napi + a hiányzó heti / havi (ütemezéshez)
+```
+
+| riport | tartalom |
+|---|---|
+| napi | az éjszaka (alvás, HRV), reggeli edzéskészség és leggyengébb tényezői, a tegnapi nap (víz, stressz, edzés) vs. előző 7 nap |
+| heti | célok táblázat (✅/⚠️), alvásritmus (lefekvés szórása), víz, aerob zónapercek, terhelésegyensúly, 3 lépés a jövő hétre |
+| havi | hónap vs. előző hónap, VO2max / terhelés változás, szokások a hét napjai szerint, korrelációk (pl. lefekvés ↔ alvás pontszám) |
+
+Mentés: `data/reports/<típus>/<címke>.md` + a tények `.json`-ban. Egy riport egyszer készül el
+(`--force` felülírja). Költség: egy riport ~10k token, DeepSeeken havonta pár cent.
+
+Ütemezés Linuxon: `./scripts/install-cron.sh --with-report` — reggel 7:30-kor sync + `report auto`
+(`REPORT_SCHEDULE="0 8 * * *"` felülírja). A kimaradt heti / havi riportot a következő futás pótolja.
+
+**Adatvédelem:** az egészségadataid (összesített számok) a választott AI-szolgáltatóhoz kerülnek.
+A DeepSeek Kínában tárol; ha ez gond, állíts be másik szolgáltatót (`LLM_BASE_URL`, `LLM_MODEL`).
+
 ## Hogyan működik a szinkron
 
 - **Napi végpontok** (alvás, pulzus, stressz, Body Battery, HRV, SpO2, légzés, edzéskészség, …) naponta:
@@ -87,12 +123,13 @@ mert mindig az utolsó sikeres naptól tölt.
 | tábla | forrás |
 |---|---|
 | `daily_summary` | lépés, kalória, nyugalmi/min/max pulzus, stressz, Body Battery, emelet, intenzív percek |
-| `sleep` | alvásfázisok, alvás pontszám, légzés, SpO2 |
+| `sleep` | alvásfázisok, alvás pontszám, lefekvés / ébredés (helyi idő), légzés, SpO2 |
 | `hrv` | éjszakai / heti HRV, státusz |
 | `intraday` | napon belüli idősorok hosszú formában (`metric`, `ts_ms`, `value`): `heart_rate` (2 perc), `stress`, `body_battery` (3 perc), `respiration` |
 | `training_readiness` | edzéskészség pontszám és tényezői; naponta több mérés, `is_morning=1` az ébredés utáni |
-| `training_status` | edzésállapot, akut/krónikus terhelés, ACWR, VO2max, havi terheléseloszlás |
-| `activities` | aktivitás összefoglalók + hivatkozás a raw mappára |
+| `hydration` | napi folyadékbevitel (appban rögzítve), Garmin cél, verejtékveszteség |
+| `training_status` | edzésállapot, akut/krónikus terhelés, ACWR, VO2max, havi terheléseloszlás + célsávok |
+| `activities` | aktivitás összefoglalók, edzéshatás (aerob/anaerob), terhelés, idő pulzuszónánként + hivatkozás a raw mappára |
 | `activity_laps` | körök / szakaszok (időtartam, pulzus, intenzitás típus: ACTIVE/REST/…) |
 | `activity_samples` | aktivitás idősor (pulzus, sebesség, magasság, kadencia, Body Battery, GPS, …) |
 

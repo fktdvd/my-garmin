@@ -10,6 +10,9 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "garminconnect==0.3.17",
+    "markdown>=3.11",
+    "openai>=3.22.1",
+    "python-dotenv>=1.2.3",
 ]
 
 [project.optional-dependencies]

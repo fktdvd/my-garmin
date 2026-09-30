@@ -5,6 +5,7 @@ import logging
 import sys
 from datetime import date
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from mygarmin.config import Config, load_config
 
@@ -37,6 +38,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     i = sub.add_parser("ingest", help="Raw fájlok betöltése SQLite-ba")
     i.add_argument("--rebuild", action="store_true", help="Táblák ürítése és teljes újratöltés")
+
+    r = sub.add_parser("report", help="AI riport (napi / heti / havi) e-mailben")
+    r.add_argument("kind", choices=["daily", "weekly", "monthly", "auto"],
+                   help="auto: napi + a legutóbbi teljes hét / hónap, ha még nincs meg")
+    r.add_argument("--date", type=date.fromisoformat, default=None, help="'Mai' nap (alap: ma)")
+    r.add_argument("--dry-run", action="store_true", help="Csak kiírja a promptot, nem hív AI-t, nem ment")
+    r.add_argument("--no-email", action="store_true", help="Ne küldjön e-mailt, csak mentsen")
+    r.add_argument("--force", action="store_true", help="Újragenerálja akkor is, ha már létezik")
+    r.add_argument("--no-ingest", action="store_true", help="Ne futtasson ingestet előtte")
     return p
 
 
@@ -50,6 +60,9 @@ def _utf8_console() -> None:
 def main(argv: list[str] | None = None) -> int:
     _utf8_console()
     args = _build_parser().parse_args(argv)
+    from dotenv import load_dotenv
+
+    load_dotenv(Path.cwd() / ".env")
     cfg = load_config()
     _setup_logging(cfg, args.verbose)
     log = logging.getLogger("mygarmin")
@@ -78,10 +91,25 @@ def main(argv: list[str] | None = None) -> int:
 
             ingest(cfg, rebuild=args.rebuild)
             return 0
+
+        if args.command == "report":
+            from mygarmin.report.runner import generate, run_auto
+
+            if not args.no_ingest:
+                from mygarmin.db import ingest
+
+                ingest(cfg)
+            today = args.date or date.today()
+            if args.kind == "auto":
+                run_auto(cfg, today, send_email=not args.no_email)
+            else:
+                generate(cfg, args.kind, today, dry_run=args.dry_run, send_email=not args.no_email, force=args.force)
+            return 0
     except Exception as e:
         from mygarmin.auth import NotLoggedInError
+        from mygarmin.report.agent import MissingConfigError
 
-        if isinstance(e, NotLoggedInError):
+        if isinstance(e, (NotLoggedInError, MissingConfigError)):
             log.error("%s", e)
         else:
             log.exception("Sikertelen futás: %s", args.command)
