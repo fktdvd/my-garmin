@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mygarmin"
+version = "0.1.0"
+description = "Garmin Connect adatok lokális mentése, tárolása és elemzése"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "garminconnect==0.3.17",
+]
+
+[project.optional-dependencies]
+analysis = ["pandas", "matplotlib", "jupyter", "fitparse"]
+dev = ["pytest"]
+
+[project.scripts]
+mygarmin = "mygarmin.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

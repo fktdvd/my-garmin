@@ -1,0 +1,10 @@
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Personal data, tokens, logs — never commit
+data/
+.env
